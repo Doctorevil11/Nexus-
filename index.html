@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>NexusChat Pro</title>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
@@ -27,6 +27,7 @@
             padding: 0;
             box-sizing: border-box;
             font-family: 'Segoe UI', system-ui, sans-serif;
+            -webkit-tap-highlight-color: transparent;
         }
 
         body {
@@ -40,7 +41,8 @@
         }
 
         .auth-container {
-            width: 480px;
+            width: 100%;
+            max-width: 480px;
             padding: 2rem;
             background: var(--surface);
             border-radius: 8px;
@@ -502,6 +504,65 @@
             font-size: 0.8rem;
             margin-left: auto;
         }
+
+        .read-receipts {
+            display: flex;
+            gap: 0.25rem;
+            margin-top: 0.5rem;
+            justify-content: flex-end;
+        }
+
+        .read-check {
+            color: var(--success);
+            font-size: 0.8rem;
+        }
+
+        .password-reset-link {
+            color: var(--primary);
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-top: 1rem;
+            display: block;
+        }
+
+        @media (max-width: 768px) {
+            .app-container {
+                flex-direction: column;
+                height: auto;
+            }
+
+            .sidebar {
+                width: 100%;
+                height: 60vh;
+                border-right: none;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+            }
+
+            .main-chat {
+                height: 40vh;
+            }
+
+            .user-item {
+                padding: 0.5rem;
+            }
+
+            .message {
+                max-width: 90%;
+            }
+
+            .input-container {
+                padding: 1rem;
+            }
+
+            .chat-input {
+                padding: 0.75rem;
+            }
+
+            .icon-button {
+                width: 36px;
+                height: 36px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -550,6 +611,16 @@
             </button>
         </div>
         <p class="toggle-link" id="toggle-auth-mode">Don't have an account? Sign Up</p>
+        <p class="password-reset-link" id="password-reset">Forgot password?</p>
+    </div>
+
+    <div id="reset-modal" class="auth-container" style="display: none;">
+        <div class="auth-header">
+            <h1>Reset Password</h1>
+        </div>
+        <input type="email" id="reset-email" placeholder="Enter your email" class="message-input">
+        <button id="reset-submit" class="toolbar-button">Send Reset Link</button>
+        <p class="toggle-link" id="reset-cancel">Back to Login</p>
     </div>
 
     <div class="app-container" id="app-container">
@@ -603,24 +674,23 @@
     <input type="file" id="file-input" accept="image/*" style="display: none;">
     <div id="emoji-picker" class="emoji-picker-container"></div>
 
-    <script>const firebaseConfig = {
+    <script>
+        const firebaseConfig = {
             apiKey: "AIzaSyB1DK-cPKRkrhwR9K6tQmrNtJkzzqC4Wos",
             authDomain: "nexus-55b47.firebaseapp.com",
             projectId: "nexus-55b47",
-            storageBucket: "nexus-55b47.firebasestorage.app",
+            storageBucket: "nexus-55b47.appspot.com",
             messagingSenderId: "1080590459525",
-            appId: "1:1080590459525:web:c4df9b9df43e3895e2ffec"
+            appId: "1:1080590459525:web:c4df9b9df43e3895e2ffec",
+            databaseURL: "https://nexus-55b47-default-rtdb.firebaseio.com"
         };
 
-        // Initialize Firebase
         firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.firestore();
         const storage = firebase.storage();
         const rtdb = firebase.database();
 
-
-        // State management
         let isLogin = true;
         let replyTarget = null;
         let currentChat = { id: 'general', type: 'group', name: 'General Chat' };
@@ -636,7 +706,6 @@
             requireSpecialChar: true
         };
 
-        // Authentication functions
         function sanitizeUsername(username) {
             return username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '').substring(0,15);
         }
@@ -670,9 +739,9 @@
             rules.special.classList.toggle('rule-invalid', !validation.rules.specialChar);
         }
 
-        function showError(message) {
+        function showError(message, type = 'error') {
             const errorElement = document.createElement('div');
-            errorElement.className = 'error-message';
+            errorElement.className = `error-message ${type}`;
             errorElement.textContent = message;
             errorElement.style.display = 'block';
             const authHeader = document.querySelector('.auth-header');
@@ -686,7 +755,6 @@
             errorElement.style.display = 'block';
         }
 
-        // UI Event Listeners
         document.getElementById('password').addEventListener('input', function() {
             const password = this.value;
             if (!isLogin) {
@@ -708,7 +776,6 @@
             document.getElementById('password-rules').style.display = isLogin ? 'none' : 'block';
         });
 
-        // Auth Handlers
         async function handleAuth() {
             const email = document.getElementById('email').value.trim();
             const password = document.getElementById('password').value;
@@ -775,34 +842,45 @@
             try {
                 const result = await auth.signInWithPopup(provider);
                 const user = result.user;
-                let baseUsername = sanitizeUsername(user.displayName) ||
-                                user.email.split('@')[0].substring(0,15);
+                
+                let baseUsername = sanitizeUsername(user.displayName) || user.email.split('@')[0];
                 if (!baseUsername) baseUsername = 'user';
-                let uniqueUsername = baseUsername;
-                let counter = 1;
-                let usernameDoc;
-                do {
-                    const usernameRef = db.collection('usernames').doc(uniqueUsername);
-                    usernameDoc = await usernameRef.get();
-                    if (usernameDoc.exists) {
-                        uniqueUsername = `${baseUsername}${counter}`;
-                        counter++;
+                
+                const usernameRef = db.collection('usernames').doc(baseUsername);
+                const doc = await usernameRef.get();
+                
+                if (!doc.exists) {
+                    await user.updateProfile({ displayName: baseUsername });
+                    await db.collection('users').doc(user.uid).set({
+                        username: baseUsername,
+                        email: user.email,
+                        uid: user.uid,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    await usernameRef.set({ userId: user.uid });
+                } else {
+                    let uniqueUsername = baseUsername;
+                    let counter = 1;
+                    while (true) {
+                        const checkRef = db.collection('usernames').doc(uniqueUsername);
+                        const exists = (await checkRef.get()).exists;
+                        if (!exists) break;
+                        uniqueUsername = `${baseUsername}${counter++}`;
                     }
-                } while (usernameDoc.exists);
-                await user.updateProfile({ displayName: uniqueUsername });
-                await db.collection('users').doc(user.uid).set({
-                    username: uniqueUsername,
-                    email: user.email,
-                    uid: user.uid,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
-                await db.collection('usernames').doc(uniqueUsername).set({ userId: user.uid });
+                    await user.updateProfile({ displayName: uniqueUsername });
+                    await db.collection('users').doc(user.uid).set({
+                        username: uniqueUsername,
+                        email: user.email,
+                        uid: user.uid,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    await db.collection('usernames').doc(uniqueUsername).set({ userId: user.uid });
+                }
             } catch (error) {
                 showError(error.message.replace('Firebase: ', ''));
             }
         }
 
-        // Password Toggle
         function setupPasswordToggle(toggleId, inputId) {
             const toggle = document.getElementById(toggleId);
             const input = document.getElementById(inputId);
@@ -821,7 +899,6 @@
         setupPasswordToggle('toggle-password', 'password');
         setupPasswordToggle('toggle-confirm-password', 'confirm-password');
 
-        // Chat Functions
         function createMessageElement(doc) {
             const msg = doc.data();
             const isSelf = msg.uid === auth.currentUser?.uid;
@@ -872,6 +949,18 @@
             content.appendChild(sender);
             content.appendChild(textEl);
             content.appendChild(time);
+
+            if (isSelf && msg.readBy) {
+                const readReceipts = document.createElement('div');
+                readReceipts.className = 'read-receipts';
+                const participants = currentChat.participants || [];
+                participants.forEach(uid => {
+                    if (uid !== auth.currentUser.uid && msg.readBy?.includes(uid)) {
+                        readReceipts.innerHTML += '<i class="fas fa-check read-check"></i>';
+                    }
+                });
+                content.appendChild(readReceipts);
+            }
 
             const actionsDiv = document.createElement('div');
             actionsDiv.className = 'msg-actions';
@@ -1023,6 +1112,7 @@
                         messagesDiv.appendChild(createMessageElement(doc));
                     });
                     messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                    markMessagesAsRead();
                 });
         }
 
@@ -1043,14 +1133,14 @@
                     username: user.displayName,
                     timestamp: firebase.firestore.FieldValue.serverTimestamp(),
                     reactions: {},
-                    replyTo: replyTarget || null
+                    replyTo: replyTarget || null,
+                    readBy: [user.uid]
                 });
             document.getElementById('message-input').value = '';
             replyTarget = null;
             document.getElementById('reply-preview').style.display = 'none';
         }
 
-        // Real-time User List Management
         function loadUserList() {
             const userList = document.getElementById('user-list');
             userList.innerHTML = `
@@ -1060,6 +1150,20 @@
                     <span>General Chat</span>
                 </div>
             `;
+
+            userList.addEventListener('click', (e) => {
+                if (e.target.closest('#general-chat-btn')) {
+                    currentChat = { 
+                        id: 'general', 
+                        type: 'group',
+                        name: 'General Chat'
+                    };
+                    document.getElementById('chat-name').textContent = currentChat.name;
+                    loadMessages();
+                    setupTypingIndicator();
+                    loadUserList();
+                }
+            });
 
             return db.collection('users').onSnapshot(snapshot => {
                 snapshot.docChanges().forEach(change => {
@@ -1126,7 +1230,8 @@
             currentChat = {
                 id: chatId,
                 type: 'private',
-                name: otherUser.username
+                name: otherUser.username,
+                participants: participants
             };
 
             document.getElementById('chat-name').textContent = currentChat.name;
@@ -1137,86 +1242,121 @@
 
         function setupTypingIndicator() {
             if (typingListener) typingListener();
+            let typingTimeout;
             const messageInput = document.getElementById('message-input');
             const typingRef = db.collection('chats').doc(currentChat.id);
             
-            messageInput.addEventListener('input', () => {
+            const updateTyping = (isTyping) => {
                 typingRef.update({
-                    [`typing.${auth.currentUser.uid}`]: true,
+                    [`typing.${auth.currentUser.uid}`]: isTyping,
                     lastActivity: firebase.firestore.FieldValue.serverTimestamp()
                 });
+            };
+
+            messageInput.addEventListener('input', () => {
+                updateTyping(true);
                 clearTimeout(typingTimeout);
-                typingTimeout = setTimeout(() => {
-                    typingRef.update({ [`typing.${auth.currentUser.uid}`]: false });
-                }, 1500);
+                typingTimeout = setTimeout(() => updateTyping(false), 1500);
             });
 
-            typingListener = typingRef.onSnapshot(doc => {
+            typingListener = typingRef.onSnapshot((doc) => {
                 const typing = doc.data()?.typing || {};
-                const typingUsers = Object.keys(typing).filter(uid => 
-                    typing[uid] && uid !== auth.currentUser.uid
-                );
+                const typingUsers = Object.entries(typing)
+                    .filter(([uid, isTyping]) => isTyping && uid !== auth.currentUser.uid);
                 
-                const indicator = document.getElementById('typing-indicator');
                 if (typingUsers.length > 0) {
-                    db.collection('users').where('uid', 'in', typingUsers).get()
+                    db.collection('users').where('uid', 'in', typingUsers.map(u => u[0])).get()
                         .then(snapshot => {
                             const names = snapshot.docs.map(doc => doc.data().username);
-                            indicator.textContent = `${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} typing...`;
+                            document.getElementById('typing-indicator').textContent = 
+                                `${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} typing...`;
                         });
                 } else {
-                    indicator.textContent = '';
+                    document.getElementById('typing-indicator').textContent = '';
+                }
+            });
+        }
+
+        function setupPresence(user) {
+            const uid = user.uid;
+            const userStatusRef = rtdb.ref(`status/${uid}`);
+            const connectedRef = rtdb.ref('.info/connected');
+            
+            connectedRef.on('value', (snap) => {
+                if (snap.val() === true) {
+                    const disconnectRef = userStatusRef.onDisconnect();
+                    disconnectRef.set({
+                        state: 'offline',
+                        lastChanged: firebase.database.ServerValue.TIMESTAMP
+                    }).then(() => {
+                        userStatusRef.set({
+                            state: 'online',
+                            lastChanged: firebase.database.ServerValue.TIMESTAMP
+                        });
+                    });
                 }
             });
         }
 
         function trackPresence() {
-            db.collection('status').onSnapshot(snapshot => {
-                snapshot.docChanges().forEach(change => {
-                    const userId = change.doc.id;
-                    const status = document.getElementById(`status-${userId}`);
-                    if (status) {
-                        status.style.backgroundColor = change.doc.data().state === 'online' 
+            rtdb.ref('status').on('value', (snapshot) => {
+                const statuses = snapshot.val() || {};
+                Object.entries(statuses).forEach(([uid, data]) => {
+                    const statusElement = document.getElementById(`status-${uid}`);
+                    if (statusElement) {
+                        statusElement.style.backgroundColor = data.state === 'online' 
                             ? 'var(--success)' : 'var(--error)';
                     }
                 });
             });
         }
 
-        function setupPresence() {
-            const currentUser = auth.currentUser;
-            if (!currentUser) return;
-            const statusRef = rtdb.ref('/status/' + currentUser.uid);
-            statusRef.onDisconnect().set({
-                state: 'offline',
-                lastChanged: firebase.database.ServerValue.TIMESTAMP,
-                email: currentUser.email
-            }).then(() => {
-                statusRef.set({
-                    state: 'online',
-                    lastChanged: firebase.database.ServerValue.TIMESTAMP,
-                    email: currentUser.email
+        function markMessagesAsRead() {
+            if (!currentChat || currentChat.type !== 'private') return;
+            
+            const messages = document.querySelectorAll('.message:not(.message-self)');
+            const batch = db.batch();
+            const currentUser = auth.currentUser.uid;
+
+            messages.forEach(msg => {
+                const messageRef = db.collection('chats').doc(currentChat.id)
+                    .collection('messages').doc(msg.dataset.id);
+                batch.update(messageRef, {
+                    readBy: firebase.firestore.FieldValue.arrayUnion(currentUser)
                 });
             });
-        }
 
-        document.getElementById('general-chat-btn').addEventListener('click', () => {
-            currentChat = { 
-                id: 'general', 
-                type: 'group',
-                name: 'General Chat'
-            };
-            document.getElementById('chat-name').textContent = currentChat.name;
-            loadMessages();
-            setupTypingIndicator();
-            loadUserList();
-        });
+            batch.commit().catch(error => console.error('Error updating read receipts:', error));
+        }
 
         document.getElementById('logout-btn').addEventListener('click', () => {
             auth.signOut();
         });
 
-        // Emoji Picker
+        document.getElementById('password-reset').addEventListener('click', () => {
+            document.getElementById('auth-container').style.display = 'none';
+            document.getElementById('reset-modal').style.display = 'block';
+        });
+
+        document.getElementById('reset-cancel').addEventListener('click', () => {
+            document.getElementById('auth-container').style.display = 'block';
+            document.getElementById('reset-modal').style.display = 'none';
+        });
+
+        document.getElementById('reset-submit').addEventListener('click', async () => {
+            const email = document.getElementById('reset-email').value.trim();
+            if (!email) return showError('Please enter your email address');
+            
+            try {
+                await auth.sendPasswordResetEmail(email);
+                showError('Password reset email sent! Check your inbox', 'success');
+                document.getElementById('reset-modal').style.display = 'none';
+                document.getElementById('auth-container').style.display = 'block';
+            } catch (error) {
+                showError(error.message.replace('Firebase: ', ''));
+            }
+        });
+
         document.addEventListener('DOMContentLoaded', () => {
             let picker = new EmojiMart.Picker({
                 parent: document.getElementById('emoji-picker'),
@@ -1241,7 +1381,6 @@
             }
         });
 
-        // File Upload
         document.getElementById('upload-btn').addEventListener('click', () => {
             document.getElementById('file-input').click();
         });
@@ -1269,7 +1408,8 @@
                                 username: auth.currentUser.displayName,
                                 timestamp: firebase.firestore.FieldValue.serverTimestamp(),
                                 reactions: {},
-                                replyTo: replyTarget || null
+                                replyTo: replyTarget || null,
+                                readBy: [auth.currentUser.uid]
                             });
                     }
                 );
@@ -1278,7 +1418,19 @@
             }
         });
 
-        // Auth State Listener
+        function handleMobileView() {
+            if (window.innerWidth <= 768) {
+                document.querySelector('.app-container').style.flexDirection = 'column';
+                document.querySelector('.sidebar').style.width = '100%';
+            } else {
+                document.querySelector('.app-container').style.flexDirection = 'row';
+                document.querySelector('.sidebar').style.width = '280px';
+            }
+        }
+
+        window.addEventListener('resize', handleMobileView);
+        handleMobileView();
+
         auth.onAuthStateChanged(async user => {
             if (user) {
                 const generalChatRef = db.collection('chats').doc('general');
@@ -1295,12 +1447,11 @@
                 document.getElementById('app-container').style.display = 'flex';
                 
                 userListUnsubscribe = loadUserList();
+                setupPresence(user);
                 trackPresence();
-                setupPresence();
                 loadMessages();
                 setupTypingIndicator();
 
-                // Cleanup on logout
                 auth.onAuthStateChanged(newUser => {
                     if (!newUser) {
                         if (userListUnsubscribe) userListUnsubscribe();
@@ -1314,7 +1465,6 @@
             }
         });
 
-        // Initialize event listeners
         document.getElementById('auth-btn').addEventListener('click', handleAuth);
         document.getElementById('google-btn').addEventListener('click', handleGoogleAuth);
     </script>
