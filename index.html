@@ -12,6 +12,157 @@
     <script src="https://cdn.jsdelivr.net/npm/emoji-mart@latest/dist/browser.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        /* Full CSS from both versions combined */
+        :root {
+            --primary: #5865F2;
+            --background: #18191c;
+            --surface: #2b2d31;
+            --text-primary: #ffffff;
+            --text-secondary: #b5bac1;
+            --success: #3ba55c;
+            --error: #ed4245;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background: var(--background);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        .auth-container {
+            width: 100%;
+            max-width: 480px;
+            padding: 2rem;
+            background: var(--surface);
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+            text-align: center;
+            margin: auto;
+        }
+
+        .auth-header {
+            margin-bottom: 1.5rem;
+        }
+
+        .auth-header h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            color: var(--primary);
+        }
+
+        .message-input {
+            width: 100%;
+            padding: 1rem;
+            margin-top: 1rem;
+            border: none;
+            border-radius: 8px;
+            background: var(--background);
+            color: var(--text-primary);
+            font-size: 1rem;
+        }
+
+        /* ... (all previous CSS styles from both versions) ... */
+
+        /* Video Call Styles */
+        #call-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.9);
+            z-index: 1000;
+            display: none;
+        }
+
+        .call-ui {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            height: 100vh;
+            padding: 2rem;
+        }
+
+        #local-video {
+            width: 200px;
+            height: 150px;
+            border: 2px solid var(--primary);
+            border-radius: 8px;
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+        }
+
+        #remote-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .call-controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 1rem;
+        }
+
+        .icon-button.red {
+            background: var(--error);
+        }
+
+        @media (max-width: 768px) {
+            .app-container {
+                flex-direction: column;
+                height: auto;
+            }
+
+            .sidebar {
+                width: 100%;
+                height: 60vh;
+                border-right: none;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+            }
+
+            .main-chat {
+                height: 40vh;
+            }
+
+            .message {
+                max-width: 90%;
+            }
+
+            #local-video {
+                width: 120px;
+                height: 90px;
+                bottom: 10px;
+                right: 10px;
+            }
+
+            .call-controls {
+                bottom: 10px;
+                gap: 0.5rem;
+            }
+
+            .icon-button {
+                width: 36px;
+                height: 36px;
+            }
+        }
+        
         :root {
             --primary: #5865F2;
             --background: #18191c;
@@ -566,6 +717,7 @@
     </style>
 </head>
 <body>
+    <!-- Authentication Container -->
     <div class="auth-container" id="auth-container">
         <div class="auth-header">
             <h1>NexusChat</h1>
@@ -614,6 +766,7 @@
         <p class="password-reset-link" id="password-reset">Forgot password?</p>
     </div>
 
+    <!-- Reset Password Modal -->
     <div id="reset-modal" class="auth-container" style="display: none;">
         <div class="auth-header">
             <h1>Reset Password</h1>
@@ -623,6 +776,7 @@
         <p class="toggle-link" id="reset-cancel">Back to Login</p>
     </div>
 
+    <!-- Main App Container -->
     <div class="app-container" id="app-container">
         <div class="sidebar">
             <div class="sidebar-header">
@@ -671,6 +825,29 @@
         </div>
     </div>
 
+    <!-- Video Call Container -->
+    <div id="call-container">
+        <div class="call-ui">
+            <video id="local-video" muted autoplay></video>
+            <video id="remote-video" autoplay></video>
+            <div class="call-controls">
+                <button id="end-call" class="icon-button red">
+                    <i class="fas fa-phone-slash"></i>
+                </button>
+                <button id="toggle-audio" class="icon-button">
+                    <i class="fas fa-microphone"></i>
+                </button>
+                <button id="toggle-video" class="icon-button">
+                    <i class="fas fa-video"></i>
+                </button>
+                <button id="share-screen" class="icon-button">
+                    <i class="fas fa-desktop"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- File Input and Emoji Picker -->
     <input type="file" id="file-input" accept="image/*" style="display: none;">
     <div id="emoji-picker" class="emoji-picker-container"></div>
 
@@ -691,6 +868,159 @@
         const storage = firebase.storage();
         const rtdb = firebase.database();
 
+        class WebRTCManager {
+            constructor() {
+                this.peerConnection = null;
+                this.localStream = null;
+                this.remoteStream = new MediaStream();
+                this.currentCallId = null;
+                this.isCaller = false;
+            }
+
+            async startCall(recipientId) {
+                this.currentCallId = Date.now().toString();
+                this.isCaller = true;
+                
+                try {
+                    this.localStream = await navigator.mediaDevices.getUserMedia({
+                        video: true,
+                        audio: true
+                    });
+                    
+                    document.getElementById('local-video').srcObject = this.localStream;
+                    this.setupPeerConnection();
+                    this.createOffer(recipientId);
+                    document.getElementById('call-container').style.display = 'block';
+                } catch (error) {
+                    console.error('Error accessing media devices:', error);
+                    showError('Failed to access camera/microphone');
+                }
+            }
+
+            setupPeerConnection() {
+                const configuration = {
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                };
+
+                this.peerConnection = new RTCPeerConnection(configuration);
+                
+                this.localStream.getTracks().forEach(track => {
+                    this.peerConnection.addTrack(track, this.localStream);
+                });
+
+                this.peerConnection.ontrack = (event) => {
+                    event.streams[0].getTracks().forEach(track => {
+                        this.remoteStream.addTrack(track);
+                    });
+                    document.getElementById('remote-video').srcObject = this.remoteStream;
+                };
+
+                this.peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        db.collection('calls').doc(this.currentCallId).update({
+                            iceCandidates: firebase.firestore.FieldValue.arrayUnion(event.candidate.toJSON())
+                        });
+                    }
+                };
+            }
+
+            async createOffer(recipientId) {
+                try {
+                    const offer = await this.peerConnection.createOffer();
+                    await this.peerConnection.setLocalDescription(offer);
+                    
+                    await db.collection('calls').doc(this.currentCallId).set({
+                        caller: auth.currentUser.uid,
+                        callee: recipientId,
+                        offer: offer,
+                        iceCandidates: [],
+                        answer: null,
+                        status: 'ringing',
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    
+                    this.listenForAnswer();
+                } catch (error) {
+                    console.error('Error creating offer:', error);
+                    showError('Failed to start call');
+                }
+            }
+
+            async handleIncomingCall(callId) {
+                try {
+                    this.currentCallId = callId;
+                    const callDoc = await db.collection('calls').doc(callId).get();
+                    const callData = callDoc.data();
+                    
+                    if (!callData || callData.status !== 'ringing') return;
+
+                    this.setupPeerConnection();
+                    await this.peerConnection.setRemoteDescription(callData.offer);
+                    
+                    const answer = await this.peerConnection.createAnswer();
+                    await this.peerConnection.setLocalDescription(answer);
+                    
+                    await db.collection('calls').doc(callId).update({
+                        answer: answer,
+                        status: 'answered'
+                    });
+                    
+                    document.getElementById('call-container').style.display = 'block';
+                    this.addIceCandidates(callData.iceCandidates);
+                } catch (error) {
+                    console.error('Error handling incoming call:', error);
+                    showError('Failed to answer call');
+                }
+            }
+
+            async addIceCandidates(candidates) {
+                try {
+                    for (const candidate of candidates) {
+                        await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                    }
+                } catch (error) {
+                    console.error('Error adding ICE candidates:', error);
+                }
+            }
+
+            endCall() {
+                if (this.peerConnection) this.peerConnection.close();
+                if (this.localStream) this.localStream.getTracks().forEach(track => track.stop());
+                document.getElementById('call-container').style.display = 'none';
+                if (this.currentCallId) {
+                    db.collection('calls').doc(this.currentCallId).delete();
+                    this.currentCallId = null;
+                }
+            }
+
+            async toggleScreenSharing() {
+                try {
+                    const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                    const screenTrack = screenStream.getVideoTracks()[0];
+                    const sender = this.peerConnection.getSenders().find(s => s.track.kind === 'video');
+                    if (sender) sender.replaceTrack(screenTrack);
+                    screenTrack.onended = () => this.toggleScreenSharing();
+                } catch (error) {
+                    console.error('Error sharing screen:', error);
+                }
+            }
+
+            listenForAnswer() {
+                db.collection('calls').doc(this.currentCallId)
+                    .onSnapshot(async (snapshot) => {
+                        const callData = snapshot.data();
+                        if (callData?.answer && !this.peerConnection.currentRemoteDescription) {
+                            await this.peerConnection.setRemoteDescription(callData.answer);
+                        }
+                        if (callData?.iceCandidates) {
+                            this.addIceCandidates(callData.iceCandidates);
+                        }
+                    });
+            }
+        }
+
+        // Original Chat Application Logic
+        const webRTCManager = new WebRTCManager();
         let isLogin = true;
         let replyTarget = null;
         let currentChat = { id: 'general', type: 'group', name: 'General Chat' };
@@ -698,13 +1028,6 @@
         let typingListener = null;
         let typingTimeout = null;
         let userListUnsubscribe = null;
-        const passwordRulesConfig = {
-            minLength: 8,
-            requireUppercase: true,
-            requireLowercase: true,
-            requireNumber: true,
-            requireSpecialChar: true
-        };
 
         function sanitizeUsername(username) {
             return username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '').substring(0,15);
@@ -712,11 +1035,11 @@
 
         function validatePassword(password) {
             const rules = {
-                length: password.length >= passwordRulesConfig.minLength,
+                length: password.length >= 8,
                 uppercase: /[A-Z]/.test(password),
                 lowercase: /[a-z]/.test(password),
                 number: /\d/.test(password),
-                specialChar: /[!@#$%^&*()_+\-={};':"\\|,.<>\/?]/.test(password)
+                specialChar: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)
             };
             return { isValid: Object.values(rules).every(v => v), rules };
         }
@@ -896,8 +1219,6 @@
                 }
             });
         }
-        setupPasswordToggle('toggle-password', 'password');
-        setupPasswordToggle('toggle-confirm-password', 'confirm-password');
 
         function createMessageElement(doc) {
             const msg = doc.data();
@@ -1135,7 +1456,12 @@
                     reactions: {},
                     replyTo: replyTarget || null,
                     readBy: [user.uid]
+                })
+                .catch(error => {
+                    console.error('Error sending message:', error);
+                    showError(`Failed to send message: ${error.message}`);
                 });
+
             document.getElementById('message-input').value = '';
             replyTarget = null;
             document.getElementById('reply-preview').style.display = 'none';
@@ -1187,6 +1513,9 @@
                                     <div class="username">${user.username || 'Unknown'}</div>
                                     <div class="user-email">${user.email || ''}</div>
                                 </div>
+                                <button class="icon-button start-call">
+                                    <i class="fas fa-phone"></i>
+                                </button>
                                 <div class="private-chat-indicator">Private chat</div>
                             `;
 
@@ -1431,6 +1760,33 @@
         window.addEventListener('resize', handleMobileView);
         handleMobileView();
 
+        function initVideoCalls() {
+            document.addEventListener('click', async (e) => {
+                if (e.target.closest('.start-call')) {
+                    const userId = e.target.closest('.user-item').id.split('-')[1];
+                    await webRTCManager.startCall(userId);
+                }
+            });
+
+            db.collection('calls').where('callee', '==', auth.currentUser.uid)
+                .onSnapshot(snapshot => {
+                    snapshot.docChanges().forEach(change => {
+                        if (change.type === 'added') {
+                            webRTCManager.handleIncomingCall(change.doc.id);
+                        }
+                    });
+                });
+
+            document.getElementById('end-call').addEventListener('click', () => webRTCManager.endCall());
+            document.getElementById('toggle-audio').addEventListener('click', () => {
+                webRTCManager.localStream.getAudioTracks()[0].enabled ^= true;
+            });
+            document.getElementById('toggle-video').addEventListener('click', () => {
+                webRTCManager.localStream.getVideoTracks()[0].enabled ^= true;
+            });
+            document.getElementById('share-screen').addEventListener('click', () => webRTCManager.toggleScreenSharing());
+        }
+
         auth.onAuthStateChanged(async user => {
             if (user) {
                 const generalChatRef = db.collection('chats').doc('general');
@@ -1451,12 +1807,14 @@
                 trackPresence();
                 loadMessages();
                 setupTypingIndicator();
+                initVideoCalls();
 
                 auth.onAuthStateChanged(newUser => {
                     if (!newUser) {
                         if (userListUnsubscribe) userListUnsubscribe();
                         if (messageListener) messageListener();
                         if (typingListener) typingListener();
+                        webRTCManager.endCall();
                     }
                 });
             } else {
@@ -1465,6 +1823,8 @@
             }
         });
 
+        setupPasswordToggle('toggle-password', 'password');
+        setupPasswordToggle('toggle-confirm-password', 'confirm-password');
         document.getElementById('auth-btn').addEventListener('click', handleAuth);
         document.getElementById('google-btn').addEventListener('click', handleGoogleAuth);
     </script>
